@@ -1,16 +1,11 @@
-# -------------------------------
-# IMPORTS
-# -------------------------------
+import os
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
-
 from groq import Groq
-import os
 
 # -------------------------------
 # GLOBALS
@@ -20,14 +15,20 @@ db = None
 bm25 = None
 
 # -------------------------------
-# MODELS
+# BETTER EMBEDDINGS (ACCURATE)
 # -------------------------------
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
+# -------------------------------
+# RERANKER (VERY IMPORTANT)
+# -------------------------------
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
+# -------------------------------
+# GROQ CLIENT
+# -------------------------------
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # -------------------------------
@@ -47,15 +48,11 @@ def process_document(file_path):
     new_chunks = splitter.split_documents(docs)
     chunks.extend(new_chunks)
 
-    # Rebuild FAISS
     db = FAISS.from_documents(chunks, embeddings)
 
-    # Rebuild BM25
-    texts = [chunk.page_content for chunk in chunks]
-    tokenized = [text.split() for text in texts]
+    texts = [c.page_content for c in chunks]
+    tokenized = [t.split() for t in texts]
     bm25 = BM25Okapi(tokenized)
-
-    print(f"Total chunks: {len(chunks)}")
 
 # -------------------------------
 # BM25 SEARCH
@@ -71,7 +68,7 @@ def bm25_search(query, k=3):
 # -------------------------------
 # HYBRID SEARCH
 # -------------------------------
-def hybrid_search(query, k=4):
+def hybrid_search(query, k=3):
     if db is None:
         return []
 
@@ -84,7 +81,7 @@ def hybrid_search(query, k=4):
     return unique_docs
 
 # -------------------------------
-# RERANK
+# RERANK (HIGH IMPACT)
 # -------------------------------
 def rerank(query, docs, top_k=2):
     if not docs:
@@ -97,27 +94,34 @@ def rerank(query, docs, top_k=2):
     return [doc for doc, _ in ranked[:top_k]]
 
 # -------------------------------
-# GENERATE ANSWER
+# GENERATE ANSWER (IMPROVED)
 # -------------------------------
 def generate_answer(query, docs):
     if not docs:
-        return "No relevant documents found. Upload a document first."
+        return "No relevant context found. Please upload documents."
 
-    context = "\n\n".join([doc.page_content for doc in docs])
+    context = "\n\n".join([doc.page_content[:500] for doc in docs])
 
     prompt = f"""
-You are a helpful assistant.
+You are an expert tutor helping students understand concepts clearly.
 
-Rules:
-- Answer ONLY from context
-- If not found, say "I don't know"
-- Keep answer short (2-3 lines)
+Instructions:
+- Answer ONLY using the given context
+- Explain in a SIMPLE and EASY way (like teaching a student)
+- If the concept is technical, break it into small steps
+- Use short paragraphs or bullet points when helpful
+- Include examples if possible (from the context)
+- Do NOT add information outside the context
+- If answer is partially available, explain what is available clearly
+- If completely not available, say: "This is not clearly mentioned in the document"
 
 Context:
 {context}
 
 Question:
 {query}
+
+Answer:
 """
 
     response = client.chat.completions.create(

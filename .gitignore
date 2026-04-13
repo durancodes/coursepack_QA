@@ -1,6 +1,6 @@
 venv/
+.venv/
 __pycache__/
-*.pyc
+*.pdf
+data/*
 .env
-data/
-api_key
